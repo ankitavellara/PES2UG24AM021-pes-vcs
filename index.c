@@ -9,6 +9,9 @@
 #include <unistd.h>
 #include <dirent.h>
 
+// Forward declaration
+int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
 IndexEntry* index_find(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
         if (strcmp(index->entries[i].path, path) == 0)
@@ -120,9 +123,6 @@ int index_load(Index *index) {
     return 0;
 }
 
-// ─── index_save ──────────────────────────────────────────────────────────────
-// Writes index to a temp file, fsyncs, then atomically renames over the real index.
-
 int index_save(const Index *index) {
     IndexEntry *sorted = malloc(index->count * sizeof(IndexEntry));
     if (!sorted) return -1;
@@ -146,8 +146,8 @@ int index_save(const Index *index) {
         }
     }
 
-    if (fflush(f) != 0)          { fclose(f); unlink(tmp_path); free(sorted); return -1; }
-    if (fsync(fileno(f)) != 0)   { fclose(f); unlink(tmp_path); free(sorted); return -1; }
+    if (fflush(f) != 0)        { fclose(f); unlink(tmp_path); free(sorted); return -1; }
+    if (fsync(fileno(f)) != 0) { fclose(f); unlink(tmp_path); free(sorted); return -1; }
     fclose(f);
 
     if (rename(tmp_path, INDEX_FILE) != 0) { free(sorted); return -1; }
@@ -155,9 +155,46 @@ int index_save(const Index *index) {
     return 0;
 }
 
-// ─── stub ────────────────────────────────────────────────────────────────────
+// ─── index_add ───────────────────────────────────────────────────────────────
+// Reads a file, hashes its content as a blob, stores in object store,
+// then updates the index entry for that path.
 
 int index_add(Index *index, const char *path) {
-    (void)index; (void)path;
-    return -1; // stub
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    void *data = malloc(fsize > 0 ? fsize : 1);
+    if (!data) { fclose(f); return -1; }
+
+    if (fsize > 0 && fread(data, 1, fsize, f) != (size_t)fsize) {
+        free(data); fclose(f); return -1;
+    }
+    fclose(f);
+
+    ObjectID blob_id;
+    int rc = object_write(OBJ_BLOB, data, (size_t)fsize, &blob_id);
+    free(data);
+    if (rc != 0) return -1;
+
+    struct stat st;
+    if (stat(path, &st) != 0) return -1;
+
+    IndexEntry *entry = index_find(index, path);
+    if (!entry) {
+        if (index->count >= MAX_INDEX_ENTRIES) return -1;
+        entry = &index->entries[index->count];
+        index->count++;
+        snprintf(entry->path, sizeof(entry->path), "%s", path);
+    }
+
+    entry->mode      = 100644;
+    entry->hash      = blob_id;
+    entry->mtime_sec = (uint64_t)st.st_mtime;
+    entry->size      = (uint32_t)st.st_size;
+
+    return index_save(index);
 }
