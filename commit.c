@@ -1,15 +1,4 @@
 // commit.c — Commit creation and history traversal
-//
-// Commit text format:
-// tree <64-hex>
-// parent <64-hex>   <- omitted for first commit
-// author <name> <unix-timestamp>
-// committer <name> <unix-timestamp>
-//
-// <message>
-//
-// PROVIDED: commit_parse, commit_serialize, commit_walk, head_read, head_update
-// TODO: commit_create
 
 #include "commit.h"
 #include "index.h"
@@ -24,8 +13,6 @@
 
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
 int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_t *len_out);
-
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 int commit_parse(const void *data, size_t len, Commit *commit_out) {
     (void)len;
@@ -54,9 +41,9 @@ int commit_parse(const void *data, size_t len, Commit *commit_out) {
     snprintf(commit_out->author, sizeof(commit_out->author), "%s", author_buf);
     commit_out->timestamp = ts;
 
-    p = strchr(p, '\n') + 1; // skip author
-    p = strchr(p, '\n') + 1; // skip committer
-    p = strchr(p, '\n') + 1; // skip blank line
+    p = strchr(p, '\n') + 1;
+    p = strchr(p, '\n') + 1;
+    p = strchr(p, '\n') + 1;
     snprintf(commit_out->message, sizeof(commit_out->message), "%s", p);
     return 0;
 }
@@ -158,9 +145,44 @@ int head_update(const ObjectID *new_commit) {
     return rename(tmp_path, target_path);
 }
 
-// ─── TODO stub ───────────────────────────────────────────────────────────────
+// ─── commit_create ───────────────────────────────────────────────────────────
+// Builds a tree from the staged index, creates a commit object pointing to it,
+// and atomically updates HEAD to the new commit hash.
 
 int commit_create(const char *message, ObjectID *commit_id_out) {
-    (void)message; (void)commit_id_out;
-    return -1; // stub
+    // 1. Build tree from staged index
+    ObjectID tree_id;
+    if (tree_from_index(&tree_id) != 0) return -1;
+
+    // 2. Try to get the current HEAD as parent
+    ObjectID parent_id;
+    int has_parent = (head_read(&parent_id) == 0) ? 1 : 0;
+
+    // 3. Fill the commit struct
+    Commit commit = {0};
+    commit.tree = tree_id;
+    if (has_parent) {
+        commit.parent     = parent_id;
+        commit.has_parent = 1;
+    }
+    snprintf(commit.author,  sizeof(commit.author),  "%s", pes_author());
+    commit.timestamp = (uint64_t)time(NULL);
+    snprintf(commit.message, sizeof(commit.message), "%s", message);
+
+    // 4. Serialize and write to object store
+    void *data;
+    size_t len;
+    if (commit_serialize(&commit, &data, &len) != 0) return -1;
+
+    ObjectID commit_id;
+    if (object_write(OBJ_COMMIT, data, len, &commit_id) != 0) {
+        free(data); return -1;
+    }
+    free(data);
+
+    // 5. Move HEAD to the new commit
+    if (head_update(&commit_id) != 0) return -1;
+
+    *commit_id_out = commit_id;
+    return 0;
 }
