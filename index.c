@@ -95,13 +95,10 @@ static int compare_entries(const void *a, const void *b) {
     return strcmp(((IndexEntry*)a)->path, ((IndexEntry*)b)->path);
 }
 
-// ─── index_load ──────────────────────────────────────────────────────────────
-// Reads .pes/index line by line. If the file doesn't exist, returns empty index.
-
 int index_load(Index *index) {
     index->count = 0;
     FILE *f = fopen(INDEX_FILE, "r");
-    if (!f) return 0; // no index yet is fine
+    if (!f) return 0;
 
     char hex[HASH_HEX_SIZE + 1];
     while (index->count < MAX_INDEX_ENTRIES) {
@@ -123,12 +120,42 @@ int index_load(Index *index) {
     return 0;
 }
 
-// ─── stubs ───────────────────────────────────────────────────────────────────
+// ─── index_save ──────────────────────────────────────────────────────────────
+// Writes index to a temp file, fsyncs, then atomically renames over the real index.
 
 int index_save(const Index *index) {
-    (void)index;
-    return -1; // stub
+    IndexEntry *sorted = malloc(index->count * sizeof(IndexEntry));
+    if (!sorted) return -1;
+    memcpy(sorted, index->entries, index->count * sizeof(IndexEntry));
+    qsort(sorted, index->count, sizeof(IndexEntry), compare_entries);
+
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
+
+    FILE *f = fopen(tmp_path, "w");
+    if (!f) { free(sorted); return -1; }
+
+    char hex[HASH_HEX_SIZE + 1];
+    for (int i = 0; i < index->count; i++) {
+        hash_to_hex(&sorted[i].hash, hex);
+        if (fprintf(f, "%u %s %llu %u %s\n",
+                    sorted[i].mode, hex,
+                    sorted[i].mtime_sec, sorted[i].size,
+                    sorted[i].path) < 0) {
+            fclose(f); unlink(tmp_path); free(sorted); return -1;
+        }
+    }
+
+    if (fflush(f) != 0)          { fclose(f); unlink(tmp_path); free(sorted); return -1; }
+    if (fsync(fileno(f)) != 0)   { fclose(f); unlink(tmp_path); free(sorted); return -1; }
+    fclose(f);
+
+    if (rename(tmp_path, INDEX_FILE) != 0) { free(sorted); return -1; }
+    free(sorted);
+    return 0;
 }
+
+// ─── stub ────────────────────────────────────────────────────────────────────
 
 int index_add(Index *index, const char *path) {
     (void)index; (void)path;
