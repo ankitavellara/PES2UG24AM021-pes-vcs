@@ -8,8 +8,32 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
-int index_load(Index *index);
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out);
+
+// Minimal index_load stub so test_tree doesn't need index.o at link time
+// The real implementation lives in index.c
+#ifndef FULL_BUILD
+int index_load(Index *index) {
+    index->count = 0;
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) return 0;
+    char hex[HASH_HEX_SIZE + 1];
+    while (index->count < MAX_INDEX_ENTRIES) {
+        if (fscanf(f, "%u %64s %llu %u %511s",
+                   &index->entries[index->count].mode,
+                   hex,
+                   &index->entries[index->count].mtime_sec,
+                   &index->entries[index->count].size,
+                   index->entries[index->count].path) != 5) break;
+        if (hex_to_hash(hex, &index->entries[index->count].hash) != 0) {
+            fclose(f); return -1;
+        }
+        index->count++;
+    }
+    fclose(f);
+    return 0;
+}
+#endif
 
 #define MODE_FILE 0100644
 #define MODE_EXEC 0100755
