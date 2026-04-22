@@ -184,3 +184,5 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     *len_out  = actual_data_len;
     return 0;
 }
+
+printf("Phase 1 completed");
