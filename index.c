@@ -1,10 +1,4 @@
 // index.c — Staging area implementation
-//
-// Text format of .pes/index (one entry per line, sorted by path):
-// <mode-octal> <64-char-hex-hash> <mtime-seconds> <size> <path>
-//
-// PROVIDED functions: index_find, index_remove, index_status
-// TODO functions: index_load, index_save, index_add
 
 #include "index.h"
 #include <stdio.h>
@@ -14,8 +8,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
-
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
 
 IndexEntry* index_find(Index *index, const char *path) {
     for (int i = 0; i < index->count; i++) {
@@ -103,12 +95,35 @@ static int compare_entries(const void *a, const void *b) {
     return strcmp(((IndexEntry*)a)->path, ((IndexEntry*)b)->path);
 }
 
-// ─── TODO stubs ──────────────────────────────────────────────────────────────
+// ─── index_load ──────────────────────────────────────────────────────────────
+// Reads .pes/index line by line. If the file doesn't exist, returns empty index.
 
 int index_load(Index *index) {
     index->count = 0;
-    return 0; // stub
+    FILE *f = fopen(INDEX_FILE, "r");
+    if (!f) return 0; // no index yet is fine
+
+    char hex[HASH_HEX_SIZE + 1];
+    while (index->count < MAX_INDEX_ENTRIES) {
+        if (fscanf(f, "%u %64s %llu %u %511s",
+                   &index->entries[index->count].mode,
+                   hex,
+                   &index->entries[index->count].mtime_sec,
+                   &index->entries[index->count].size,
+                   index->entries[index->count].path) != 5) {
+            break;
+        }
+        if (hex_to_hash(hex, &index->entries[index->count].hash) != 0) {
+            fclose(f);
+            return -1;
+        }
+        index->count++;
+    }
+    fclose(f);
+    return 0;
 }
+
+// ─── stubs ───────────────────────────────────────────────────────────────────
 
 int index_save(const Index *index) {
     (void)index;
