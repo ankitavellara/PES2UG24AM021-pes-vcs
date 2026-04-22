@@ -1,10 +1,4 @@
 // tree.c — Tree object serialization and construction
-//
-// Binary tree format (per entry):
-// "<mode-as-ascii-octal> <name>\0<32-byte-binary-hash>"
-//
-// PROVIDED functions: get_file_mode, tree_parse, tree_serialize
-// TODO functions: tree_from_index
 
 #include "tree.h"
 #include "index.h"
@@ -92,7 +86,89 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
     return 0;
 }
 
-// ─── TODO stub ───────────────────────────────────────────────────────────────
+// ─── Recursive helper ────────────────────────────────────────────────────────
+// Builds a tree for all index entries under a given prefix at depth 0.
+// For subdirectories, recurses with the subdirectory path as a new prefix.
+
+static int write_tree_level(IndexEntry *entries, int count, int depth, const char *prefix, ObjectID *id_out) {
+    Tree tree = {0};
+
+    for (int i = 0; i < count; i++) {
+        IndexEntry *entry = &entries[i];
+        const char *path = entry->path;
+
+        if (prefix && strncmp(path, prefix, strlen(prefix)) != 0)
+            continue;
+
+        if (prefix)
+            path = path + strlen(prefix);
+
+        int slashes = 0;
+        for (const char *p = path; *p; p++)
+            if (*p == '/') slashes++;
+
+        if (slashes < depth) continue;
+
+        int slash_count = 0;
+        const char *current = path;
+        while (slash_count < depth && *current) {
+            if (*current == '/') slash_count++;
+            current++;
+        }
+
+        const char *next_slash = strchr(current, '/');
+        char component_name[256] = {0};
+
+        if (next_slash) {
+            int len = next_slash - current;
+            snprintf(component_name, sizeof(component_name), "%.*s", len, current);
+        } else {
+            snprintf(component_name, sizeof(component_name), "%s", current);
+        }
+
+        int found = 0;
+        for (int j = 0; j < tree.count; j++) {
+            if (strcmp(tree.entries[j].name, component_name) == 0) {
+                found = 1; break;
+            }
+        }
+
+        if (!found && tree.count < MAX_TREE_ENTRIES) {
+            TreeEntry *tentry = &tree.entries[tree.count];
+            snprintf(tentry->name, sizeof(tentry->name), "%s", component_name);
+            if (next_slash) {
+                tentry->mode = MODE_DIR;
+            } else {
+                tentry->mode  = entry->mode;
+                tentry->hash  = entry->hash;
+            }
+            tree.count++;
+        }
+    }
+
+    // Recurse into subdirectories
+    for (int i = 0; i < tree.count; i++) {
+        if (tree.entries[i].mode == MODE_DIR) {
+            char new_prefix[512] = {0};
+            if (prefix)
+                snprintf(new_prefix, sizeof(new_prefix), "%s%s/", prefix, tree.entries[i].name);
+            else
+                snprintf(new_prefix, sizeof(new_prefix), "%s/", tree.entries[i].name);
+
+            if (write_tree_level(entries, count, 0, new_prefix, &tree.entries[i].hash) != 0)
+                return -1;
+        }
+    }
+
+    void *data;
+    size_t len;
+    if (tree_serialize(&tree, &data, &len) != 0) return -1;
+    if (object_write(OBJ_TREE, data, len, id_out) != 0) { free(data); return -1; }
+    free(data);
+    return 0;
+}
+
+// ─── tree_from_index stub (to be wired next) ─────────────────────────────────
 
 int tree_from_index(ObjectID *id_out) {
     (void)id_out;
