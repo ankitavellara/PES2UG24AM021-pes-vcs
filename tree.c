@@ -194,3 +194,5 @@ int tree_from_index(ObjectID *id_out) {
     if (index_load(&index) != 0) return -1;
     return write_tree_level(index.entries, index.count, 0, NULL, id_out);
 }
+
+printf("Phase 2 completed");
