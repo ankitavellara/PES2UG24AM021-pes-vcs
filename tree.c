@@ -15,8 +15,6 @@ int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out
 #define MODE_EXEC 0100755
 #define MODE_DIR  0040000
 
-// ─── PROVIDED ────────────────────────────────────────────────────────────────
-
 uint32_t get_file_mode(const char *path) {
     struct stat st;
     if (lstat(path, &st) != 0) return 0;
@@ -86,10 +84,6 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
     return 0;
 }
 
-// ─── Recursive helper ────────────────────────────────────────────────────────
-// Builds a tree for all index entries under a given prefix at depth 0.
-// For subdirectories, recurses with the subdirectory path as a new prefix.
-
 static int write_tree_level(IndexEntry *entries, int count, int depth, const char *prefix, ObjectID *id_out) {
     Tree tree = {0};
 
@@ -139,14 +133,13 @@ static int write_tree_level(IndexEntry *entries, int count, int depth, const cha
             if (next_slash) {
                 tentry->mode = MODE_DIR;
             } else {
-                tentry->mode  = entry->mode;
-                tentry->hash  = entry->hash;
+                tentry->mode = entry->mode;
+                tentry->hash = entry->hash;
             }
             tree.count++;
         }
     }
 
-    // Recurse into subdirectories
     for (int i = 0; i < tree.count; i++) {
         if (tree.entries[i].mode == MODE_DIR) {
             char new_prefix[512] = {0};
@@ -168,9 +161,12 @@ static int write_tree_level(IndexEntry *entries, int count, int depth, const cha
     return 0;
 }
 
-// ─── tree_from_index stub (to be wired next) ─────────────────────────────────
+// ─── tree_from_index ─────────────────────────────────────────────────────────
+// Loads the index and builds the complete tree hierarchy from it.
+// Calls write_tree_level starting from the root (no prefix).
 
 int tree_from_index(ObjectID *id_out) {
-    (void)id_out;
-    return -1; // stub
+    Index index;
+    if (index_load(&index) != 0) return -1;
+    return write_tree_level(index.entries, index.count, 0, NULL, id_out);
 }
